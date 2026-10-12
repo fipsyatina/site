@@ -15,12 +15,15 @@
   const scrollRoot = document.getElementById('scroll-container');
   const pointerSurface = document.getElementById('section1') || window;
   const LOOP_DURATION = 24;
-  const STILL_PHASE = 1.4;
+  const STILL_PHASE = 0;
+  const referenceImage = new Image();
+  referenceImage.decoding = 'async';
   container.dataset.loopDuration = String(LOOP_DURATION);
 
   let gl = null;
   let program = null;
   let vertexBuffer = null;
+  let referenceTexture = null;
   let uniforms = null;
   let animationFrame = 0;
   let resizeFrame = 0;
@@ -46,130 +49,35 @@
     }
   `;
 
+  // The source frame preserves the video's exact material and studio lighting.
+  // Only the sampling coordinates move; no video is loaded or played.
   const fragmentBody = `
     uniform vec2 u_resolution;
     uniform vec2 u_pointer;
     uniform float u_time;
     uniform float u_pulse;
-    uniform float u_steps;
-
-    // Two cheap rotations let the pointer turn the object without changing its
-    // silhouette or making it feel like a draggable UI control.
-    vec3 turnObject(vec3 p) {
-      float ay = u_pointer.x * 0.18;
-      float ax = -u_pointer.y * 0.12;
-      float cy = cos(ay), sy = sin(ay);
-      float cx = cos(ax), sx = sin(ax);
-      p.xz = mat2(cy, -sy, sy, cy) * p.xz;
-      p.yz = mat2(cx, -sx, sx, cx) * p.yz;
-      return p;
-    }
-
-    float orbDistance(vec3 p) {
-      p.y += 0.015;
-      float len = length(p);
-      vec3 q = turnObject(p / max(len, 0.0001));
-
-      // u_time is a 0..2 PI phase. Integer temporal harmonics make both
-      // the surface and its velocity join seamlessly every 24 seconds.
-      float broad = sin(dot(q, vec3(1.55, 2.15, -1.35)) * 1.72 + u_time);
-      broad *= sin(dot(q, vec3(-2.05, 1.10, 1.75)) * 1.44 - u_time * 2.0);
-      float lobe = sin(q.x * 3.7 - q.y * 2.4 + q.z * 1.9 + u_time * 2.0);
-      lobe += 0.55 * sin(q.y * 4.3 + q.z * 2.1 - u_time * 2.0);
-      float asymmetry = 0.5 + 0.5 * dot(q, normalize(vec3(-0.7, 0.45, 0.3)));
-      float ripple = u_pulse * sin(dot(q, normalize(vec3(u_pointer, 0.85))) * 11.0 - u_time * 4.0);
-      float radius = 0.72 + broad * 0.07 + lobe * 0.027 + asymmetry * 0.028 + ripple * 0.012;
-      return len - radius;
-    }
-
-    vec3 orbNormal(vec3 p) {
-      // Tetrahedral sampling saves one map call compared with central XYZ
-      // differences and is stable enough for the broad liquid-metal surface.
-      const float e = 0.0022;
-      vec2 h = vec2(1.0, -1.0) * 0.5773;
-      return normalize(
-        h.xyy * orbDistance(p + h.xyy * e) +
-        h.yyx * orbDistance(p + h.yyx * e) +
-        h.yxy * orbDistance(p + h.yxy * e) +
-        h.xxx * orbDistance(p + h.xxx * e)
-      );
-    }
-
-    float studioPanel(vec3 ray, vec3 direction, vec2 halfSize, float softness) {
-      vec3 forward = normalize(direction);
-      vec3 right = normalize(cross(vec3(0.0, 1.0, 0.0), forward));
-      vec3 up = cross(forward, right);
-      float depth = dot(ray, forward);
-      vec2 panelUv = vec2(dot(ray, right), dot(ray, up)) / max(depth, 0.08);
-      float boxDistance = max(abs(panelUv.x) - halfSize.x, abs(panelUv.y) - halfSize.y);
-      return (1.0 - smoothstep(-softness, softness, boxDistance)) * smoothstep(0.05, 0.42, depth);
-    }
+    uniform sampler2D u_reference;
 
     void main() {
-      vec2 uv = (gl_FragCoord.xy * 2.0 - u_resolution.xy) / min(u_resolution.x, u_resolution.y);
-      vec3 rayOrigin = vec3(0.0, 0.015, 2.65);
-      vec3 rayDirection = normalize(vec3(uv * 1.02, -2.2));
-
-      // Start at a conservative bounding sphere, leaving the raymarch budget
-      // for the liquid surface and its grazing silhouette rather than empty space.
-      float projection = dot(rayOrigin, rayDirection);
-      float discriminant = projection * projection - dot(rayOrigin, rayOrigin) + 0.90 * 0.90;
-      if (discriminant < 0.0) {
+      vec2 p = (gl_FragCoord.xy - 0.5 * u_resolution) / min(u_resolution.x, u_resolution.y);
+      p *= 1.25;
+      float phase = u_time;
+      // Periodic flow returns to the untouched reference at phase zero.
+      vec2 flow = vec2(
+        sin(p.y * 5.0 + p.x * 2.0) * sin(phase),
+        sin(p.x * 4.0 - p.y * 3.0) * sin(phase * 2.0)
+      );
+      p += flow * 0.027;
+      p += vec2(sin(phase), sin(phase * 2.0)) * 0.009;
+      float radius = length(p);
+      p *= 1.0 + 0.022 * sin(phase) + u_pulse * 0.025 * sin(radius * 18.0 - phase * 4.0);
+      p += u_pointer * (0.014 + radius * radius * 0.025);
+      vec2 sampleUv = p + 0.5;
+      if (sampleUv.x < 0.0 || sampleUv.x > 1.0 || sampleUv.y < 0.0 || sampleUv.y > 1.0) {
         gl_FragColor = vec4(0.0);
         return;
       }
-      float travel = max(0.0, -projection - sqrt(discriminant));
-      float farSurface = -projection + sqrt(discriminant);
-      float distanceToSurface = 0.0;
-      bool hit = false;
-
-      // The hard ceiling keeps GPU cost predictable. u_steps selects a lower
-      // budget on small/coarse/save-data devices without compiling a variant.
-      for (int i = 0; i < 64; i++) {
-        if (float(i) >= u_steps) break;
-        vec3 p = rayOrigin + rayDirection * travel;
-        distanceToSurface = orbDistance(p);
-        if (distanceToSurface < 0.0015) {
-          hit = true;
-          break;
-        }
-        if (travel > farSurface) break;
-        travel += max(distanceToSurface * 0.55, 0.0005);
-      }
-
-      if (!hit) {
-        gl_FragColor = vec4(0.0);
-        return;
-      }
-
-      vec3 position = rayOrigin + rayDirection * travel;
-      vec3 normal = orbNormal(position);
-      vec3 view = normalize(rayOrigin - position);
-      vec3 reflected = reflect(-view, normal);
-      float facing = max(dot(normal, view), 0.0);
-      float fresnel = pow(1.0 - facing, 3.2);
-
-      // Soft rectangular sources mimic a dark photographic studio: the face
-      // stays nearly black while two silver cards describe the curved volume.
-      float leftPanel = studioPanel(reflected, vec3(-0.66, 0.55, 0.62), vec2(0.34, 0.59), 0.22);
-      float rightPanel = studioPanel(reflected, vec3(0.76, 0.39, 0.54), vec2(0.34, 0.48), 0.19);
-      float topPanel = studioPanel(reflected, vec3(-0.08, 0.93, 0.34), vec2(0.52, 0.16), 0.24);
-      float foldedSheen = pow(max(0.0, 0.5 + 0.5 * dot(reflected, normalize(vec3(-0.42, 0.2, 0.88)))), 3.2);
-      foldedSheen *= 0.55 + 0.45 * sin(normal.y * 5.0 + normal.x * 2.0);
-
-      vec3 base = vec3(0.006, 0.007, 0.008);
-      vec3 silver = vec3(0.47, 0.485, 0.50);
-      vec3 color = base;
-      color += silver * leftPanel * 0.54;
-      color += silver * rightPanel * 0.42;
-      color += silver * topPanel * 0.10;
-      color += vec3(0.08, 0.082, 0.085) * foldedSheen;
-      color += vec3(0.048, 0.051, 0.054) * fresnel;
-      color += vec3(0.012) * max(normal.y, 0.0);
-      color *= 0.92 + 0.08 * smoothstep(-0.7, 0.8, normal.y);
-
-      // Blend the original dark material with exactly one percent white.
-      color = mix(color, vec3(1.0), 0.01);
+      vec3 color = texture2D(u_reference, sampleUv).rgb;
       gl_FragColor = vec4(color, 1.0);
     }
   `;
@@ -192,6 +100,8 @@
 
   function releaseGraphics() {
     if (!gl || contextLost) return;
+    if (referenceTexture) gl.deleteTexture(referenceTexture);
+    referenceTexture = null;
     if (vertexBuffer) gl.deleteBuffer(vertexBuffer);
     if (program) gl.deleteProgram(program);
     vertexBuffer = null;
@@ -249,10 +159,20 @@
       pointer: gl.getUniformLocation(program, 'u_pointer'),
       time: gl.getUniformLocation(program, 'u_time'),
       pulse: gl.getUniformLocation(program, 'u_pulse'),
-      steps: gl.getUniformLocation(program, 'u_steps')
+      reference: gl.getUniformLocation(program, 'u_reference')
     };
 
+    referenceTexture = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, referenceTexture);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, referenceImage);
     gl.useProgram(program);
+    gl.uniform1i(uniforms.reference, 0);
     gl.disable(gl.DEPTH_TEST);
     gl.disable(gl.BLEND);
     setRenderer('webgl');
@@ -302,7 +222,7 @@
     gl.uniform2f(uniforms.pointer, pointerX, pointerY);
     gl.uniform1f(uniforms.time, reducedMotion.matches ? STILL_PHASE : elapsed / LOOP_DURATION * Math.PI * 2);
     gl.uniform1f(uniforms.pulse, pulse);
-    gl.uniform1f(uniforms.steps, lowPowerMode() ? 48 : 64);
+
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -401,6 +321,7 @@
     contextLost = true;
     program = null;
     vertexBuffer = null;
+    referenceTexture = null;
     uniforms = null;
     setRenderer('fallback');
     updateMotionState();
@@ -486,5 +407,7 @@
     updateMotionState();
   }
 
-  initialize();
+  referenceImage.onload = () => { if (!destroyed) initialize(); };
+  referenceImage.onerror = () => setRenderer('fallback');
+  referenceImage.src = new URL('orb-reference.jpg', document.baseURI).href;
 })();

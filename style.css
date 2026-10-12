@@ -145,18 +145,11 @@ a, p {
   display: block;
 }
 
-/* A quiet chrome still remains visible without JavaScript or WebGL. */
+/* Keep the exact reference frame visible while loading or without WebGL. */
 .orb-fallback {
   position: absolute;
-  inset: 17%;
-  border-radius: 45% 55% 49% 51% / 53% 44% 56% 47%;
-  transform: rotate(-14deg);
-  background:
-    radial-gradient(ellipse at 29% 19%, #979ba5 0%, #3c3f47 9%, transparent 25%),
-    radial-gradient(ellipse at 83% 40%, #676a76 0%, #262830 10%, transparent 28%),
-    radial-gradient(ellipse at 48% 88%, #26282d 0%, transparent 18%),
-    radial-gradient(ellipse at 42% 38%, #0a0b0e 30%, #040405 72%);
-  box-shadow: inset 0 0 1px 1px #ffffff12, inset -8px -7px 20px #000;
+  inset: 10%;
+  background: url('orb-reference.jpg') center / contain no-repeat;
 }
 
 .orb-container[data-renderer="webgl"] .orb-fallback {
