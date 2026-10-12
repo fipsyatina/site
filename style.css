@@ -15,6 +15,7 @@
 }
 
 html, body {
+  height: 100%;
   margin: 0;
   padding: 0;
   background: #000;
@@ -59,15 +60,19 @@ nav.top-nav a {
 }
 
 .smooth-scroll {
-  height: 100vh;
+  position: fixed;
+  top: calc(var(--sizeindex) * 3);
+  left: 0;
+  width: 100%;
+  height: calc(100vh - var(--sizeindex) * 3);
+  height: calc(100dvh - var(--sizeindex) * 3);
   overflow-y: scroll;
   scroll-snap-type: y mandatory;
   scroll-behavior: smooth;
-  margin-top: calc(var(--sizeindex) * 3);
 }
 
 section {
-  height: 100vh;
+  height: 100%;
   padding: calc(var(--sizeindex) * 2) calc(var(--sizeindex) * 2);
   scroll-snap-align: start;
   position: relative;
@@ -119,21 +124,92 @@ a, p {
   font-size: calc(var(--sizeindex) * 1);
 }
 
-.video-container {
+.orb-container {
   position: absolute;
   right: 50%;
   transform: translate(55%, -50%);
   top: 50%;
   z-index: 1;
-}
-
-.video-container video {
   width: calc(var(--sizeindex) * 16);
-  height: auto;
-  object-fit: contain;
+  aspect-ratio: 1;
   pointer-events: none;
   user-select: none;
+}
+
+.orb-container canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
   display: block;
+}
+
+/* A quiet chrome still remains visible without JavaScript or WebGL. */
+.orb-fallback {
+  position: absolute;
+  inset: 17%;
+  border-radius: 45% 55% 49% 51% / 53% 44% 56% 47%;
+  transform: rotate(-14deg);
+  background:
+    radial-gradient(ellipse at 29% 19%, #969aa4 0%, #3a3d45 9%, transparent 25%),
+    radial-gradient(ellipse at 83% 40%, #656975 0%, #24262e 10%, transparent 28%),
+    radial-gradient(ellipse at 48% 88%, #24262b 0%, transparent 18%),
+    radial-gradient(ellipse at 42% 38%, #08090c 30%, #010102 72%);
+  box-shadow: inset 0 0 1px 1px #ffffff12, inset -8px -7px 20px #000;
+}
+
+.orb-container[data-renderer="webgl"] .orb-fallback {
+  visibility: hidden;
+}
+
+.orb-toggle {
+  position: absolute;
+  right: 12%;
+  bottom: 3%;
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  padding: 0.6em;
+  border: 0;
+  background: transparent;
+  color: #949498;
+  font: 11px "Lexend Tera", sans-serif;
+  letter-spacing: 0.02em;
+  pointer-events: auto;
+  transition: color 160ms ease;
+}
+
+.orb-toggle[hidden] {
+  display: none;
+}
+
+.orb-toggle::before {
+  content: "";
+  width: 7px;
+  height: 9px;
+  border-inline: 2px solid currentColor;
+}
+
+.orb-toggle[aria-pressed="true"]::before {
+  width: 0;
+  height: 0;
+  border: 5px solid transparent;
+  border-left: 7px solid currentColor;
+  border-right: 0;
+}
+
+.orb-toggle:focus-visible {
+  outline: 1px solid #a6a6ac;
+  outline-offset: 4px;
+  border-radius: 3px;
+  color: #fff;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .orb-toggle:hover {
+    color: #fff;
+  }
 }
 
 .side-nav {
@@ -207,23 +283,24 @@ nav.top-nav a,
     margin-top: 0; 
   }
   .left h1 {
-    font-size: calc(var(--sizeindex) * 3.2);
+    font-size: min(calc(var(--sizeindex) * 3.2), 10.5vw);
   }
   .left small {
     font-size: calc(var(--sizeindex) * 0.7);
   }
-  .video-container {
+  .orb-container {
     position: relative;
     top: 0;
     right: 0;
     transform: none;
     margin-bottom: calc(var(--sizeindex) * 1.5); 
-    width: 100%;
-    display: flex;
-    justify-content: center;
+    width: min(85%, 340px);
+    flex-shrink: 0;
   }
-  .video-container video {
-    width: 75%; 
+  .orb-toggle {
+    right: 7%;
+    bottom: 0;
+    font-size: 9px;
   }
  
   header#date-header, nav.top-nav a {
@@ -245,5 +322,53 @@ nav.top-nav a,
   }
   #section2 h2 {
     text-align: center;
+  }
+}
+
+/* Keep the orb and full name visible on a phone turned sideways. */
+@media (max-width: 950px) and (max-height: 480px) and (orientation: landscape) {
+  #section1 {
+    flex-direction: row;
+    justify-content: space-between;
+  }
+  .left {
+    width: 55%;
+  }
+  .left h1 {
+    font-size: min(calc(var(--sizeindex) * 3.2), 6vw);
+  }
+  .orb-container {
+    position: relative;
+    top: 0;
+    right: 0;
+    transform: none;
+    margin-bottom: 0;
+    width: min(38vw, calc(100dvh - 7rem));
+  }
+  .orb-toggle {
+    right: 0;
+    bottom: 0;
+    font-size: 8px;
+  }
+}
+
+@media (hover: none), (pointer: coarse) {
+  *, nav.top-nav a, .side-nav span {
+    cursor: auto !important;
+  }
+  .cursor {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .smooth-scroll {
+    scroll-behavior: auto;
+  }
+  .blur-on-scroll, .cursor, .side-nav span {
+    transition: none;
+  }
+  .blur {
+    filter: none;
   }
 }

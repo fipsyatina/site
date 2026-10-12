@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>fipsyatina</title>
   <link rel="stylesheet" href="style.css">
+  <script src="orb.js" defer></script>
 </head>
 <body>
  
@@ -25,10 +26,10 @@
         <br>
         <small>fipsyatina</small>
       </div>
-      <div class="video-container">
-        <video autoplay muted loop playsinline preload="auto">
-          <source src="anim.mp4" type="video/mp4" />
-        </video>
+      <div class="orb-container" id="orb" data-renderer="fallback">
+        <div class="orb-fallback" aria-hidden="true"></div>
+        <canvas id="orb-canvas" width="480" height="480" aria-hidden="true"></canvas>
+        <button class="orb-toggle" id="orb-toggle" type="button" aria-pressed="false" hidden>Pause motion</button>
       </div>
     </section>
 
@@ -60,10 +61,12 @@
 
     const sideDots = document.querySelectorAll('.side-nav span');
     const sections = document.querySelectorAll('section');
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const scrollBehavior = () => reducedMotion.matches ? 'instant' : 'smooth';
 
     sideDots.forEach(dot => {
       dot.addEventListener('click', () => {
-        document.getElementById(dot.dataset.target).scrollIntoView({ behavior: 'smooth' });
+        document.getElementById(dot.dataset.target).scrollIntoView({ behavior: scrollBehavior() });
       });
     });
 
@@ -99,13 +102,20 @@
     container.addEventListener('wheel', (e) => {
       e.preventDefault();
       const sectionsArray = Array.from(sections);
-      const current = sectionsArray.findIndex(sec => Math.abs(sec.getBoundingClientRect().top) < 2);
+      const rootTop = container.getBoundingClientRect().top;
+      const current = sectionsArray.reduce((nearest, section, index) => {
+        const distance = Math.abs(section.getBoundingClientRect().top - rootTop);
+        const nearestDistance = Math.abs(sectionsArray[nearest].getBoundingClientRect().top - rootTop);
+        return distance < nearestDistance ? index : nearest;
+      }, 0);
       if (current === 0 && e.deltaY < 0) return;
-      document.querySelectorAll('.blur-on-scroll').forEach(el => el.classList.add('blur'));
+      if (!reducedMotion.matches) {
+        document.querySelectorAll('.blur-on-scroll').forEach(el => el.classList.add('blur'));
+      }
       if (e.deltaY > 0 && current < sectionsArray.length - 1) {
-        sectionsArray[current + 1].scrollIntoView({ behavior: 'smooth' });
+        sectionsArray[current + 1].scrollIntoView({ behavior: scrollBehavior() });
       } else if (e.deltaY < 0 && current > 0) {
-        sectionsArray[current - 1].scrollIntoView({ behavior: 'smooth' });
+        sectionsArray[current - 1].scrollIntoView({ behavior: scrollBehavior() });
       }
       setTimeout(() => {
         document.querySelectorAll('.blur-on-scroll').forEach(el => el.classList.remove('blur'));
