@@ -149,30 +149,27 @@
       float facing = max(dot(normal, view), 0.0);
       float fresnel = pow(1.0 - facing, 3.2);
 
-      // Broad studio reflections and a gentle fill reveal the entire graphite
-      // surface instead of letting it disappear into the black background.
+      // Soft rectangular sources mimic a dark photographic studio: the face
+      // stays nearly black while two silver cards describe the curved volume.
       float leftPanel = studioPanel(reflected, vec3(-0.66, 0.55, 0.62), vec2(0.34, 0.59), 0.22);
       float rightPanel = studioPanel(reflected, vec3(0.76, 0.39, 0.54), vec2(0.34, 0.48), 0.19);
       float topPanel = studioPanel(reflected, vec3(-0.08, 0.93, 0.34), vec2(0.52, 0.16), 0.24);
-      float lowerPanel = studioPanel(reflected, vec3(-0.45, -0.65, 0.55), vec2(0.48, 0.18), 0.28);
       float foldedSheen = pow(max(0.0, 0.5 + 0.5 * dot(reflected, normalize(vec3(-0.42, 0.2, 0.88)))), 3.2);
       foldedSheen *= 0.55 + 0.45 * sin(normal.y * 5.0 + normal.x * 2.0);
 
-      vec3 base = vec3(0.014, 0.016, 0.020);
-      vec3 silver = vec3(0.64, 0.68, 0.74);
+      vec3 base = vec3(0.006, 0.007, 0.008);
+      vec3 silver = vec3(0.47, 0.485, 0.50);
       vec3 color = base;
-      color += silver * leftPanel * 0.62;
-      color += silver * rightPanel * 0.50;
-      color += silver * topPanel * 0.18;
-      color += silver * lowerPanel * 0.16;
-      color += vec3(0.10, 0.11, 0.13) * foldedSheen;
-      color += vec3(0.11, 0.13, 0.16) * fresnel;
-      float frontFill = max(dot(normal, normalize(vec3(-0.35, 0.45, 1.0))), 0.0);
-      color += vec3(0.035, 0.038, 0.045) * frontFill;
+      color += silver * leftPanel * 0.54;
+      color += silver * rightPanel * 0.42;
+      color += silver * topPanel * 0.10;
+      color += vec3(0.08, 0.082, 0.085) * foldedSheen;
+      color += vec3(0.048, 0.051, 0.054) * fresnel;
+      color += vec3(0.012) * max(normal.y, 0.0);
       color *= 0.92 + 0.08 * smoothstep(-0.7, 0.8, normal.y);
-      // The lighting above is linear; encode it for the display so graphite
-      // midtones remain visible rather than being crushed into black.
-      color = pow(clamp(color, 0.0, 1.0), vec3(1.0 / 2.2));
+
+      // Blend the original dark material with exactly one percent white.
+      color = mix(color, vec3(1.0), 0.01);
       gl_FragColor = vec4(color, 1.0);
     }
   `;
