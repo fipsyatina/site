@@ -14,7 +14,9 @@
   const saveData = Boolean(navigator.connection && navigator.connection.saveData);
   const scrollRoot = document.getElementById('scroll-container');
   const pointerSurface = document.getElementById('section1') || window;
-  const motionToggle = document.getElementById('orb-toggle');
+  const LOOP_DURATION = 24;
+  const STILL_PHASE = 1.4;
+  container.dataset.loopDuration = String(LOOP_DURATION);
 
   let gl = null;
   let program = null;
@@ -26,7 +28,6 @@
   let resizeObserver = null;
   let isIntersecting = true;
   let pageActive = true;
-  let userPaused = false;
   let destroyed = false;
   let contextLost = false;
   let elapsed = 0;
@@ -69,13 +70,12 @@
       float len = length(p);
       vec3 q = turnObject(p / max(len, 0.0001));
 
-      // Incommensurate frequencies keep the breathing evolution from visibly
-      // looping. Low amplitudes preserve a polished sphere instead of creating
-      // a noisy blob.
-      float broad = sin(dot(q, vec3(1.55, 2.15, -1.35)) * 1.72 + u_time * 0.31);
-      broad *= sin(dot(q, vec3(-2.05, 1.10, 1.75)) * 1.44 - u_time * 0.23);
-      float lobe = sin(q.x * 3.7 - q.y * 2.4 + q.z * 1.9 + u_time * 0.17);
-      lobe += 0.55 * sin(q.y * 4.3 + q.z * 2.1 - u_time * 0.29);
+      // u_time is a 0..2 PI phase. Integer temporal harmonics make both
+      // the surface and its velocity join seamlessly every 24 seconds.
+      float broad = sin(dot(q, vec3(1.55, 2.15, -1.35)) * 1.72 + u_time);
+      broad *= sin(dot(q, vec3(-2.05, 1.10, 1.75)) * 1.44 - u_time * 2.0);
+      float lobe = sin(q.x * 3.7 - q.y * 2.4 + q.z * 1.9 + u_time * 2.0);
+      lobe += 0.55 * sin(q.y * 4.3 + q.z * 2.1 - u_time * 2.0);
       float asymmetry = 0.5 + 0.5 * dot(q, normalize(vec3(-0.7, 0.45, 0.3)));
       float ripple = u_pulse * sin(dot(q, normalize(vec3(u_pointer, 0.85))) * 11.0 - u_time * 4.0);
       float radius = 0.72 + broad * 0.07 + lobe * 0.027 + asymmetry * 0.028 + ripple * 0.012;
@@ -110,13 +110,22 @@
       vec3 rayOrigin = vec3(0.0, 0.015, 2.65);
       vec3 rayDirection = normalize(vec3(uv * 1.02, -2.2));
 
-      float travel = 0.0;
+      // Start at a conservative bounding sphere, leaving the raymarch budget
+      // for the liquid surface and its grazing silhouette rather than empty space.
+      float projection = dot(rayOrigin, rayDirection);
+      float discriminant = projection * projection - dot(rayOrigin, rayOrigin) + 0.90 * 0.90;
+      if (discriminant < 0.0) {
+        gl_FragColor = vec4(0.0);
+        return;
+      }
+      float travel = max(0.0, -projection - sqrt(discriminant));
+      float farSurface = -projection + sqrt(discriminant);
       float distanceToSurface = 0.0;
       bool hit = false;
 
       // The hard ceiling keeps GPU cost predictable. u_steps selects a lower
       // budget on small/coarse/save-data devices without compiling a variant.
-      for (int i = 0; i < 56; i++) {
+      for (int i = 0; i < 64; i++) {
         if (float(i) >= u_steps) break;
         vec3 p = rayOrigin + rayDirection * travel;
         distanceToSurface = orbDistance(p);
@@ -124,8 +133,8 @@
           hit = true;
           break;
         }
-        if (travel > 4.1) break;
-        travel += max(distanceToSurface * 0.62, 0.0035);
+        if (travel > farSurface) break;
+        travel += max(distanceToSurface * 0.55, 0.0005);
       }
 
       if (!hit) {
@@ -140,42 +149,36 @@
       float facing = max(dot(normal, view), 0.0);
       float fresnel = pow(1.0 - facing, 3.2);
 
-      // Soft rectangular sources mimic a dark photographic studio: the face
-      // stays nearly black while two silver cards describe the curved volume.
+      // Broad studio reflections and a gentle fill reveal the entire graphite
+      // surface instead of letting it disappear into the black background.
       float leftPanel = studioPanel(reflected, vec3(-0.66, 0.55, 0.62), vec2(0.34, 0.59), 0.22);
       float rightPanel = studioPanel(reflected, vec3(0.76, 0.39, 0.54), vec2(0.34, 0.48), 0.19);
       float topPanel = studioPanel(reflected, vec3(-0.08, 0.93, 0.34), vec2(0.52, 0.16), 0.24);
+      float lowerPanel = studioPanel(reflected, vec3(-0.45, -0.65, 0.55), vec2(0.48, 0.18), 0.28);
       float foldedSheen = pow(max(0.0, 0.5 + 0.5 * dot(reflected, normalize(vec3(-0.42, 0.2, 0.88)))), 3.2);
       foldedSheen *= 0.55 + 0.45 * sin(normal.y * 5.0 + normal.x * 2.0);
 
-      vec3 base = vec3(0.006, 0.007, 0.008);
-      vec3 silver = vec3(0.47, 0.485, 0.50);
+      vec3 base = vec3(0.014, 0.016, 0.020);
+      vec3 silver = vec3(0.64, 0.68, 0.74);
       vec3 color = base;
-      color += silver * leftPanel * 0.54;
-      color += silver * rightPanel * 0.42;
-      color += silver * topPanel * 0.10;
-      color += vec3(0.08, 0.082, 0.085) * foldedSheen;
-      color += vec3(0.048, 0.051, 0.054) * fresnel;
-      color += vec3(0.012) * max(normal.y, 0.0);
+      color += silver * leftPanel * 0.62;
+      color += silver * rightPanel * 0.50;
+      color += silver * topPanel * 0.18;
+      color += silver * lowerPanel * 0.16;
+      color += vec3(0.10, 0.11, 0.13) * foldedSheen;
+      color += vec3(0.11, 0.13, 0.16) * fresnel;
+      float frontFill = max(dot(normal, normalize(vec3(-0.35, 0.45, 1.0))), 0.0);
+      color += vec3(0.035, 0.038, 0.045) * frontFill;
       color *= 0.92 + 0.08 * smoothstep(-0.7, 0.8, normal.y);
-
+      // The lighting above is linear; encode it for the display so graphite
+      // midtones remain visible rather than being crushed into black.
+      color = pow(clamp(color, 0.0, 1.0), vec3(1.0 / 2.2));
       gl_FragColor = vec4(color, 1.0);
     }
   `;
 
   function setRenderer(value) {
     container.dataset.renderer = value;
-    updateToggle();
-  }
-
-  function updateToggle() {
-    if (!motionToggle) return;
-    const unavailable = !program || contextLost || destroyed || reducedMotion.matches;
-    motionToggle.hidden = unavailable;
-    motionToggle.disabled = unavailable;
-    motionToggle.setAttribute('aria-pressed', String(userPaused));
-    motionToggle.setAttribute('aria-label', userPaused ? 'Resume motion' : 'Pause motion');
-    motionToggle.textContent = userPaused ? 'Resume motion' : 'Pause motion';
   }
 
   function compileShader(type, source) {
@@ -300,9 +303,9 @@
     gl.useProgram(program);
     gl.uniform2f(uniforms.resolution, canvas.width, canvas.height);
     gl.uniform2f(uniforms.pointer, pointerX, pointerY);
-    gl.uniform1f(uniforms.time, reducedMotion.matches ? 5.7 : elapsed);
+    gl.uniform1f(uniforms.time, reducedMotion.matches ? STILL_PHASE : elapsed / LOOP_DURATION * Math.PI * 2);
     gl.uniform1f(uniforms.pulse, pulse);
-    gl.uniform1f(uniforms.steps, lowPowerMode() ? 40 : 56);
+    gl.uniform1f(uniforms.steps, lowPowerMode() ? 48 : 64);
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -310,7 +313,7 @@
 
   function shouldAnimate() {
     return !destroyed && !contextLost && Boolean(program) && pageActive &&
-      !document.hidden && isIntersecting && !reducedMotion.matches && !userPaused;
+      !document.hidden && isIntersecting && !reducedMotion.matches;
   }
 
   function updateMotionState() {
@@ -320,10 +323,8 @@
 
     if (reducedMotion.matches) {
       container.dataset.motion = 'still';
-      elapsed = 5.7;
       pointerX = pointerY = targetPointerX = targetPointerY = pulse = 0;
       draw();
-      updateToggle();
       return;
     }
 
@@ -334,7 +335,6 @@
       container.dataset.motion = 'paused';
       draw();
     }
-    updateToggle();
   }
 
   function tick(now) {
@@ -345,7 +345,7 @@
 
     if (lastFrameTime) {
       const delta = Math.min((now - lastFrameTime) / 1000, 0.05);
-      elapsed += delta;
+      elapsed = (elapsed + delta) % LOOP_DURATION;
       const smoothing = 1 - Math.exp(-delta * 5.5);
       pointerX += (targetPointerX - pointerX) * smoothing;
       pointerY += (targetPointerY - pointerY) * smoothing;
@@ -375,18 +375,11 @@
   }
 
   function onPointerDown(event) {
-    if (!finePointer.matches || reducedMotion.matches || userPaused ||
-        motionToggle?.contains(event.target)) return;
+    if (!finePointer.matches || reducedMotion.matches) return;
     const bounds = canvas.getBoundingClientRect();
     if (event.clientX < bounds.left || event.clientX > bounds.right ||
         event.clientY < bounds.top || event.clientY > bounds.bottom) return;
     pulse = 1;
-  }
-
-  function onToggleMotion() {
-    if (reducedMotion.matches || !program || contextLost) return;
-    userPaused = !userPaused;
-    updateMotionState();
   }
 
   function onVisibilityChange() {
@@ -442,7 +435,6 @@
     pointerSurface.removeEventListener('pointermove', onPointerMove);
     pointerSurface.removeEventListener('pointerleave', onPointerLeave);
     pointerSurface.removeEventListener('pointerdown', onPointerDown);
-    motionToggle?.removeEventListener('click', onToggleMotion);
     canvas.removeEventListener('webglcontextlost', onContextLost);
     canvas.removeEventListener('webglcontextrestored', onContextRestored);
     document.removeEventListener('visibilitychange', onVisibilityChange);
@@ -469,7 +461,6 @@
     pointerSurface.addEventListener('pointermove', onPointerMove, { passive: true });
     pointerSurface.addEventListener('pointerleave', onPointerLeave, { passive: true });
     pointerSurface.addEventListener('pointerdown', onPointerDown, { passive: true });
-    motionToggle?.addEventListener('click', onToggleMotion);
     document.addEventListener('visibilitychange', onVisibilityChange);
     window.addEventListener('pagehide', onPageHide);
     window.addEventListener('pageshow', onPageShow);

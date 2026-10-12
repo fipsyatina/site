@@ -14,7 +14,7 @@ Open http://127.0.0.1:8765/.
 
 ## Live orb
 
-`orb.js` renders the dark liquid-metal surface in WebGL. The shape and studio reflections are calculated for each frame; no video or external textures are used. Move a mouse over the orb to gently turn the surface, or click it for a small ripple. The **Pause motion** button also works with Enter or Space.
+`orb.js` renders a graphite liquid-metal surface with silver studio reflections in WebGL. The shape is calculated for each frame and repeats seamlessly every 24 seconds; no video or external textures are used. The animation runs automatically without buttons. Move a mouse over the orb to gently turn the surface, or click it for a small ripple.
 
 - Reduced motion: a still frame with pointer effects disabled.
 - Offscreen or hidden page: rendering pauses and resumes when visible again.
